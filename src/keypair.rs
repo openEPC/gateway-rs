@@ -1,5 +1,11 @@
 use crate::*;
-use helium_crypto::{ecc608, KeyTag, KeyType, Network};
+use helium_crypto::{KeyTag, KeyType, Network};
+#[cfg(feature = "ecc608")]
+use helium_crypto::{ecc608};
+#[cfg(feature = "ecc608")]
+use std::path::Path;
+#[cfg(feature = "tpm")]
+use helium_crypto::{tpm};
 use http::Uri;
 use rand::rngs::OsRng;
 use serde::{de, Deserializer};
@@ -67,8 +73,9 @@ impl FromStr for Keypair {
                     url.path()
                 )),
             },
+            #[cfg(feature = "ecc608")]
             Some("ecc") => {
-                let args = KeypairArgs::from_uri(&url).map_err(error::DecodeError::keypair_uri)?;
+            let args = KeypairArgs::from_uri(&url).map_err(error::DecodeError::keypair_uri)?;
 
                 let bus_address = url.port_u16().unwrap_or(96);
                 let slot = args.get::<u8>("slot", 0)?;
@@ -91,6 +98,27 @@ impl FromStr for Keypair {
                                 uri_error!("could not load ecc keypair in slot {slot}: {err:?}")
                             })
                     })?;
+                Ok(keypair.into())
+            }
+            #[cfg(feature = "tpm")]
+            Some("tpm") => {
+                let args = KeypairArgs::from_uri(&url).map_err(error::DecodeError::keypair_uri)?;
+                let network = args.get("network", Network::MainNet)?;
+                let path = url.path();
+
+                let keypair = tpm::init()
+                    .map_err(|err| {
+                        uri_error!("could not initialize tpm \"{path}\": {err:?}")
+                    })
+                    .and_then(|_| {
+
+                        tpm::Keypair::from_key_path(network, path)
+                            .map(helium_crypto::Keypair::from)
+                            .map_err(|err| {
+                            uri_error!("could not load tpm keypair on path {path}: {err:?}")
+                        })
+                    })?;
+
                 Ok(keypair.into())
             }
             Some(unknown) => Err(uri_error!("unkown keypair scheme: \"{unknown}\"")),

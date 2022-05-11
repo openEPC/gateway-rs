@@ -106,18 +106,11 @@ impl FromStr for Keypair {
                 let network = args.get("network", Network::MainNet)?;
                 let path = url.path();
 
-                let keypair = tpm::init()
-                    .map_err(|err| {
-                        uri_error!("could not initialize tpm \"{path}\": {err:?}")
-                    })
-                    .and_then(|_| {
-
-                        tpm::Keypair::from_key_path(network, path)
+                let keypair = tpm::Keypair::from_key_path(network, path)
                             .map(helium_crypto::Keypair::from)
                             .map_err(|err| {
                             uri_error!("could not load tpm keypair on path {path}: {err:?}")
-                        })
-                    })?;
+                        })?;
 
                 Ok(keypair.into())
             }

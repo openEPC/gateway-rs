@@ -7,6 +7,7 @@ TAR = { source = "${CARGO_MAKE_RUST_TARGET_OS}", default_value = "linux", mappin
 AR = "ar"
 PKG_BUILD_DIR ="target/pkg/${CARGO_MAKE_PROFILE}"
 PKG_SRC_DIR = "package/${CARGO_MAKE_PROFILE}"
+FEATURES = "ecc608"
 
 [env.raspi01]
 CROSS_TARGET = "arm-unknown-linux-gnueabihf"
@@ -23,6 +24,11 @@ PKG = "deb"
 [env.x86_64]
 CROSS_TARGET = "x86_64-unknown-linux-gnu"
 PKG = "deb"
+
+[env.freedomfi]
+CROSS_TARGET = "x86_64-unknown-linux-gnu"
+PKG = "deb"
+FEATURES = "tpm"
 
 [env.klkgw]
 CROSS_TARGET = "armv7-unknown-linux-musleabihf"
@@ -92,6 +98,9 @@ args = [
   "build",
   "--target",
   "${CROSS_TARGET}",
+  "--no-default-features",
+  "--features",
+  "${FEATURES}",
   "--release"
 ]
 

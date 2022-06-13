@@ -883,8 +883,8 @@ checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
 
 [[package]]
 name = "helium-crypto"
-version = "0.4.1"
-source = "git+https://github.com/helium/helium-crypto-rs?tag=v0.4.1#1d63d4e10b68b320a2acbbed220bfdae6760316e"
+version = "0.4.2"
+source = "git+https://github.com/helium/helium-crypto-rs?tag=v0.4.2#5140abc7d672ef3ec4cf1a2ea242ba5c77883464"
 dependencies = [
  "base64",
  "bs58",

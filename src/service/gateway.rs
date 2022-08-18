@@ -1,13 +1,12 @@
 use crate::{
     service::{CONNECT_TIMEOUT, RPC_TIMEOUT},
-    Error, KeyedUri, Keypair, MsgSign, MsgVerify, PublicKey, Region, Result,
+    Error, KeyedUri, Keypair, MsgSign, MsgVerify, PublicKey, Region, RegionParams, Result,
 };
 use helium_proto::{
     gateway_resp_v1,
     services::{self, Channel, Endpoint},
-    BlockchainTxnStateChannelCloseV1, BlockchainVarV1, GatewayConfigReqV1, GatewayConfigRespV1,
-    GatewayRegionParamsUpdateReqV1, GatewayRespV1, GatewayRoutingReqV1, GatewayScCloseReqV1,
-    GatewayScFollowReqV1, GatewayScFollowStreamedRespV1, GatewayScIsActiveReqV1,
+    BlockchainVarV1, GatewayConfigReqV1, GatewayConfigRespV1, GatewayRegionParamsReqV1,
+    GatewayRegionParamsUpdateReqV1, GatewayRespV1, GatewayRoutingReqV1, GatewayScIsActiveReqV1,
     GatewayScIsActiveRespV1, GatewayValidatorsReqV1, GatewayValidatorsRespV1, GatewayVersionReqV1,
     GatewayVersionRespV1, Routing,
 };
@@ -16,10 +15,8 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
-use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::Stream;
 
 type GatewayClient = services::gateway::Client<Channel>;
 pub use crate::service::version::GatewayVersion;
@@ -48,8 +45,7 @@ impl Stream for Streaming {
 pub(crate) trait Response {
     fn height(&self) -> u64;
     fn routings(&self) -> Result<&[Routing]>;
-    fn region(&self) -> Result<Region>;
-    fn state_channel_response(&self) -> Result<&GatewayScFollowStreamedRespV1>;
+    fn region_params(&self) -> Result<RegionParams>;
 }
 
 impl Response for GatewayRespV1 {
@@ -66,61 +62,18 @@ impl Response for GatewayRespV1 {
         }
     }
 
-    fn region(&self) -> Result<Region> {
+    fn region_params(&self) -> Result<RegionParams> {
         match &self.msg {
             Some(gateway_resp_v1::Msg::RegionParamsStreamedResp(params)) => {
-                Region::from_i32(params.region)
+                RegionParams::try_from(params.to_owned())
+            }
+            Some(gateway_resp_v1::Msg::RegionParamsResp(params)) => {
+                RegionParams::try_from(params.to_owned())
             }
             msg => Err(Error::custom(
                 format!("Unexpected gateway message {msg:?}",),
             )),
         }
-    }
-
-    fn state_channel_response(&self) -> Result<&GatewayScFollowStreamedRespV1> {
-        match &self.msg {
-            Some(gateway_resp_v1::Msg::FollowStreamedResp(res)) => Ok(res),
-            msg => Err(Error::custom(
-                format!("Unexpected gateway message {msg:?}",),
-            )),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct StateChannelFollowService {
-    tx: mpsc::Sender<GatewayScFollowReqV1>,
-    rx: Streaming,
-}
-
-impl StateChannelFollowService {
-    pub async fn new(mut client: GatewayClient, verifier: Arc<PublicKey>) -> Result<Self> {
-        let (tx, client_rx) = mpsc::channel(3);
-        let streaming = client
-            .follow_sc(ReceiverStream::new(client_rx))
-            .await?
-            .into_inner();
-        let rx = Streaming {
-            streaming,
-            verifier,
-        };
-        Ok(Self { tx, rx })
-    }
-
-    pub async fn send(&mut self, id: &[u8], owner: &[u8]) -> Result {
-        let msg = GatewayScFollowReqV1 {
-            sc_id: id.into(),
-            sc_owner: owner.into(),
-        };
-        Ok(self.tx.send(msg).await?)
-    }
-}
-
-impl Stream for StateChannelFollowService {
-    type Item = Result<GatewayRespV1>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.rx).poll_next(cx)
     }
 }
 
@@ -133,8 +86,8 @@ pub struct GatewayService {
 impl GatewayService {
     pub fn new(keyed_uri: &KeyedUri) -> Result<Self> {
         let channel = Endpoint::from(keyed_uri.uri.clone())
-            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT))
-            .timeout(Duration::from_secs(RPC_TIMEOUT))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(RPC_TIMEOUT)
             .connect_lazy();
         Ok(Self {
             uri: keyed_uri.clone(),
@@ -189,6 +142,22 @@ impl GatewayService {
         })
     }
 
+    pub async fn region_params_for(
+        &mut self,
+        region: &Region,
+        keypair: Arc<Keypair>,
+    ) -> Result<RegionParams> {
+        let mut req = GatewayRegionParamsReqV1 {
+            address: keypair.public_key().to_vec(),
+            signature: vec![],
+            region: i32::from(region),
+        };
+        req.signature = req.sign(keypair).await?;
+
+        let region_params = self.client.region_params(req).await?;
+        region_params.into_inner().region_params()
+    }
+
     pub async fn is_active_sc(
         &mut self,
         id: &[u8],
@@ -219,20 +188,6 @@ impl GatewayService {
             ))),
             None => Err(Error::custom("empty is_active response")),
         }
-    }
-
-    pub async fn follow_sc(&mut self) -> Result<StateChannelFollowService> {
-        StateChannelFollowService::new(self.client.clone(), self.uri.pubkey.clone()).await
-    }
-
-    pub async fn close_sc(&mut self, close_txn: BlockchainTxnStateChannelCloseV1) -> Result {
-        let _ = self
-            .client
-            .close_sc(GatewayScCloseReqV1 {
-                close_txn: Some(close_txn),
-            })
-            .await?;
-        Ok(())
     }
 
     async fn get_config(&mut self, keys: Vec<String>) -> Result<GatewayRespV1> {
@@ -276,7 +231,7 @@ impl GatewayService {
         }
     }
 
-    pub async fn version(&mut self) -> Result<Option<u64>> {
+    pub async fn version(&mut self) -> Result<u64> {
         let resp = self
             .client
             .version(GatewayVersionReqV1 {})
@@ -284,13 +239,11 @@ impl GatewayService {
             .into_inner();
         resp.verify(&self.uri.pubkey)?;
         match resp.msg {
-            Some(gateway_resp_v1::Msg::Version(GatewayVersionRespV1 { version })) => {
-                Ok(Some(version))
-            }
+            Some(gateway_resp_v1::Msg::Version(GatewayVersionRespV1 { version })) => Ok(version),
             Some(other) => Err(Error::custom(format!(
                 "invalid validator response {other:?}"
             ))),
-            None => Ok(None),
+            None => Err(Error::custom("empty version response")),
         }
     }
 }

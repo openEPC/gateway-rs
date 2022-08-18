@@ -95,11 +95,9 @@ impl<'de> Deserialize<'de> for Channel {
                 let value = value.to_lowercase();
                 match value.parse::<releases::Channel>() {
                     Ok(channel) => Ok(channel),
-                    Err(_) => {
-                        return Err(de::Error::custom(format!(
-                            "unsupported update channel: \"{value}\"",
-                        )))
-                    }
+                    Err(_) => Err(de::Error::custom(format!(
+                        "unsupported update channel: \"{value}\"",
+                    ))),
                 }
             }
         }
@@ -208,12 +206,9 @@ impl Release {
     /// Find an asset with a given name in this release. Returns None if no such
     /// asset was found.
     pub fn asset_named(&self, name: &str) -> Option<&ReleaseAsset> {
-        for asset in &self.assets {
-            if asset.name.starts_with(name) {
-                return Some(asset);
-            }
-        }
-        None
+        self.assets
+            .iter()
+            .find(|&asset| asset.name.starts_with(name))
     }
 }
 

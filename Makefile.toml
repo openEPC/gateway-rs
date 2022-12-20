@@ -1,5 +1,5 @@
 [config]
-additional_profiles = ["klkgw", "ramips_24kec", "smartharvest", "dragino", "mtcdt", "raspi01", "raspi234", "resiot", "cotx", "raspi_64", "caldigit", "tektelic", "risinghf", "clodpi", "cloudgate"]
+additional_profiles = ["klkgw", "ramips_24kec", "smartharvest", "dragino", "mtcdt", "raspi01", "raspi234", "resiot", "freedomfi", "cotx", "raspi_64", "caldigit", "tektelic", "risinghf", "clodpi", "cloudgate"]
 default_to_workspace = false
 
 [env]
@@ -27,8 +27,8 @@ CROSS_TARGET = "x86_64-unknown-linux-gnu"
 PKG = "deb"
 
 [env.freedomfi]
-CROSS_TARGET = "x86_64-unknown-linux-gnu"
-PKG = "deb"
+CROSS_TARGET = "x86_64-unknown-linux-musl"
+PKG = "ipk"
 BUILD_COMMAND = "cargo"
 FEATURES = "tpm"
 
